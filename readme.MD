@@ -47,3 +47,31 @@
     - Task, TaskGroup(Task-> Task-> Task), fan-in/fan-out => 병렬 작업
     - task 작업 시퀀스 구성 다변화
     - XCom, retry
+
+# 더미 데이터 업로드
+- .env 생성
+    - ECOMMERCE_BUCKET=<본인 버킷명>
+- 오늘 날짜로 변경
+```
+/
+L sample_data
+    L scripts
+        L dt=2026-10-08 <- 수정(당일 날짜)
+```
+- 업로드 
+```
+python -m scripts.upload_silver --date 2026-10-08
+```
+- 최종 s3
+```text
+s3://ECOMMERCE_BUCKET/
+└── silver/
+    └── dt=2026-10-08/
+        ├── products.csv
+        ├── orders.csv
+        ├── refunds.csv
+        ├── reviews.csv
+        ├── cs_tickets.csv
+        ├── policies.csv
+        └── _SUCCESS
+```
