@@ -43,8 +43,10 @@ services:
       postgres:
         condition: service_healthy
 
+    # 한개의 서비스에서 모든 기능 제공
     command: standalone
 
+    # 대시보드용 (react + fastAPI)
     ports:
       - "8080:8080"
 
