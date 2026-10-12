@@ -15,6 +15,7 @@ from airflow.sdk import Param, dag, task, task_group, get_current_context # 필�
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from psycopg2.extras import execute_values # 여러 데이터흘 한번에 insert 적제 효율 상승
 
 # 2. 전역변수(환경변수) -> .env는 이미 적용된 상태임 (airflow 내부 컨테이너)
 AWS_REGION          = os.getenv("AWS_REGION","ap-northeast-2")
@@ -144,7 +145,7 @@ def embed(text: str) -> list[float]:
     schedule   = None,
     catchup    = False,
     default_args={
-        "owner":"de-ai-22",
+        "owner":"ai-22",
         # 실패시 재시도 2회
         "retries":2,
         # 간격 30초 대기
@@ -511,6 +512,89 @@ def ecommerce_silver_to_gold():
                 # ecommerce_db : airflow > 커넥션 정보 등록
                 postgres_conn_id = "ecommerce_db"
             )
+            # 커넥션 획득
+            conn = hook.get_conn()
+            # 예외 처리 -> 실패를 대배하여 롤백 처리를 위해 구성
+            try:
+                with conn.cursor() as cur:
+                    # process_date를 기준으로(데이터를 처리하는 날 기준)
+
+                    # 중복 데이터 삭제 처리
+                    # 같은 날짜에 재실행되어서 중복된 데이터가 처리 되지 않도록 파티션 기준으로 제거
+                    cur.execute(
+                        "delete from document_chunks "
+                        "where process_date = %s",
+                        (process_date,)
+                    )
+                    cur.execute(
+                        "delete from knowledge_documents "
+                        "where process_date = %s",
+                        (process_date,)
+                    )
+
+                    # 데이터를 한번에 insert 하기 위해 insert에 맞는 구조로 데이터를 변형
+                    document_rows = [
+                        # 순서 유지 중요,
+                        (
+                            d["document_id"],
+                            d["process_date"],
+                            d["source_type"],
+                            d["source_id"],
+                            d["product_id"],
+                            d["event_time"],
+                            d["title"],
+                            d["content"],
+                            # 객체 직렬화 처리
+                            json.dumps( d["metadata"], ensure_ascii=False)
+                        )
+                        for d in documents
+                    ]
+
+                    # 한번에 batch insert 
+                    execute_values(
+                        cur,
+                        """
+                            insert into knowledge_documents (
+                                document_id,
+                                process_date,
+                                source_type,
+                                source_id,
+                                product_id,
+                                event_time,
+                                title,
+                                content,
+                                metadata
+                            )
+                            values %s
+                        """,
+                        document_rows
+                    )
+
+                    # 청크데이터 삽입
+                    chunk_rows = [
+
+                    ]
+                    execute_values(
+                        cur,
+                        """
+                        """,
+                        chunk_rows
+                    )
+
+                    pass
+                # 최종 반영
+                conn.commit()
+            except Exception:
+                conn.rollback() # 부분 적제 하지 않도록 트렌젝션 전체 롤백
+                raise
+            finally:
+                conn.close()
+
+            # 반환 정보
+            return {
+                "status": "loaded",
+                
+            }
 
         
         # 6. 실제 적제된 행수 조회 , 품질 확인 task(검증)
